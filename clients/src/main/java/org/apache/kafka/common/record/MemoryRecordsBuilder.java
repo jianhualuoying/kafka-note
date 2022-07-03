@@ -70,16 +70,19 @@ public class MemoryRecordsBuilder implements AutoCloseable {
     private float estimatedCompressionRatio = 1.0F;
 
     // Used to append records, may compress data on the fly
+    // 可以写java原始类型(int long float double)到输出流，而不是字节
     private DataOutputStream appendStream;
     private boolean isTransactional;
     private long producerId;
     private short producerEpoch;
     private int baseSequence;
     private int uncompressedRecordsSizeInBytes = 0; // Number of bytes (excluding the header) written before compression
+    // 记录这批消息中的总共消息数
     private int numRecords = 0;
     private float actualCompressionRatio = 1;
     private long maxTimestamp = RecordBatch.NO_TIMESTAMP;
     private long offsetOfMaxTimestamp = -1;
+    // 记录这批消息中最后一次写入的位移（相对位移，相对于第一个消息）
     private Long lastOffset = null;
     private Long firstTimestamp = null;
 
@@ -109,7 +112,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
             if (compressionType == CompressionType.ZSTD)
                 throw new IllegalArgumentException("ZStandard compression is not supported for magic " + magic);
         }
-
+        // 一批消息的消息格式版本，应该是固定的，消息格式版本参考org.apache.kafka.common.record.RecordBatch
         this.magic = magic;
         this.timestampType = timestampType;
         this.compressionType = compressionType;
@@ -131,6 +134,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 
         bufferStream.position(initialPosition + batchHeaderSizeInBytes);
         this.bufferStream = bufferStream;
+        // 初始化java原始类型输出流，输出流最终会输出到ByteBufferOutputStream封装的ByteBuffer
         this.appendStream = new DataOutputStream(compressionType.wrapForOutput(this.bufferStream, magic));
     }
 
@@ -167,6 +171,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
                                 boolean isControlBatch,
                                 int partitionLeaderEpoch,
                                 int writeLimit) {
+        // 自定义的ByteBufferOutputStream封装了ByteBuffer，ByteBuffer客自动扩容
         this(new ByteBufferOutputStream(buffer), magic, compressionType, timestampType, baseOffset, logAppendTime,
                 producerId, producerEpoch, baseSequence, isTransactional, isControlBatch, partitionLeaderEpoch,
                 writeLimit);
@@ -279,6 +284,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
     public void closeForRecordAppends() {
         if (appendStream != CLOSED_STREAM) {
             try {
+                // 这里最终会调用到ByteBufferOutputStream的close方法，但是它的close继承自父类，父类的close方法什么都没有做。
                 appendStream.close();
             } catch (IOException e) {
                 throw new KafkaException(e);
@@ -304,7 +310,10 @@ public class MemoryRecordsBuilder implements AutoCloseable {
         this.isTransactional = isTransactional;
     }
 
-
+    /**
+     * 实际上这个方法的作用是复制org.apache.kafka.common.utils.ByteBufferOutputStream#buffer（ByteBuffer）的内容，
+     * 构造成新的ByteBuffer，设置成可读，并封装到MemoryRecords放入org.apache.kafka.common.record.MemoryRecordsBuilder#builtRecords
+     */
     public void close() {
         if (aborted)
             throw new IllegalStateException("Cannot close MemoryRecordsBuilder as it has already been aborted");
@@ -326,8 +335,11 @@ public class MemoryRecordsBuilder implements AutoCloseable {
                 this.actualCompressionRatio = (float) writeLegacyCompressedWrapperHeader() / this.uncompressedRecordsSizeInBytes;
 
             ByteBuffer buffer = buffer().duplicate();
+            // ByteBuffer设置为可读
             buffer.flip();
             buffer.position(initialPosition);
+            // TODO 重要，这里对org.apache.kafka.common.utils.ByteBufferOutputStream.buffer（最底层的ByteBuffer进行切片，这会导致ByteBuffer的offset不会0，
+            //  也就是读取ByteBuffer时，不会从底层数组的第一个元素开始读取，而是从offset处开始），这也是为什么org.apache.kafka.common.utils.Utils.writeTo方法为什么读取ByteBuffer时，读取位置加上buffer.arrayOffset()的原因，应该是吧
             builtRecords = MemoryRecords.readableRecords(buffer.slice());
         }
     }
@@ -419,6 +431,8 @@ public class MemoryRecordsBuilder implements AutoCloseable {
                 firstTimestamp = timestamp;
 
             if (magic > RecordBatch.MAGIC_VALUE_V1) {
+                // 主要是把key和val这两个ByteBuffer中的内容输出到org.apache.kafka.common.record.MemoryRecordsBuilder.appendStream中
+                // 当然还包括当前消息相对于第一个消息的位移相对值，和相对于第一个消息的时间戳的相对值，消息头信息
                 appendDefaultRecord(offset, timestamp, key, value, headers);
                 return null;
             } else {
@@ -486,6 +500,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
      * @return CRC of the record or null if record-level CRC is not supported for the message format
      */
     public Long appendWithOffset(long offset, SimpleRecord record) {
+        // SimpleRecord中的key和val都是ByteBuffer
         return appendWithOffset(offset, record.timestamp(), record.key(), record.value(), record.headers());
     }
 
@@ -559,6 +574,8 @@ public class MemoryRecordsBuilder implements AutoCloseable {
      * @return CRC of the record or null if record-level CRC is not supported for the message format
      */
     public Long append(SimpleRecord record) {
+        // nextSequentialOffset获取上次追加消息的位置org.apache.kafka.common.record.MemoryRecordsBuilder.lastOffset
+        // 同时，appendWithOffset方法中还会更新 MemoryRecordsBuilder.lastOffset
         return appendWithOffset(nextSequentialOffset(), record);
     }
 
@@ -728,12 +745,14 @@ public class MemoryRecordsBuilder implements AutoCloseable {
         if (offset - baseOffset > Integer.MAX_VALUE)
             throw new IllegalArgumentException("Maximum offset delta exceeded, base offset: " + baseOffset +
                     ", last offset: " + offset);
-
+        // 更新这批消息中的总共消息数
         numRecords += 1;
         uncompressedRecordsSizeInBytes += size;
+        // 更新上一次写入的位移（相对位移，相对于这批消息中的第一个消息）
         lastOffset = offset;
 
         if (magic > RecordBatch.MAGIC_VALUE_V0 && timestamp > maxTimestamp) {
+            // 更新这批消息中的最大时间戳
             maxTimestamp = timestamp;
             offsetOfMaxTimestamp = offset;
         }

@@ -555,6 +555,7 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   def nonOfflinePartition(topicPartition: TopicPartition): Option[Partition] = {
+    // scala可以这样用，getPartition 返回的是 HostedPartition case类，但是继承它的 HostedPartition.Online 类，和其他实现 HostedPartition 的类不同，有个构造参数Partition
     getPartition(topicPartition) match {
       case HostedPartition.Online(partition) => Some(partition)
       case HostedPartition.None | HostedPartition.Offline => None

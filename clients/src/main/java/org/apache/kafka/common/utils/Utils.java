@@ -1122,6 +1122,8 @@ public final class Utils {
      */
     public static void writeTo(DataOutput out, ByteBuffer buffer, int length) throws IOException {
         if (buffer.hasArray()) {
+            // jdk ByteBuffer#arrayOffset返回第一个元素的位置，ByteBuffer#array返回ByteBuffer的底层数组 TODO 比较疑惑，一般在使用过ByteBuffer#slice方法后，buffer.arrayOffset()返回值才不为0，哪里有用过slice方法吗？
+            // ByteBuffer#position返回的是相对位置，相对于offset的位置
             out.write(buffer.array(), buffer.position() + buffer.arrayOffset(), length);
         } else {
             int pos = buffer.position();

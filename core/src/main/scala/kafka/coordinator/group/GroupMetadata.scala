@@ -688,6 +688,7 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
    * @param offsetWithCommitRecordMetadata
    */
   def onOffsetCommitAppend(topicPartition: TopicPartition, offsetWithCommitRecordMetadata: CommitRecordMetadataAndOffset): Unit = {
+    // 位移消息写入日志文件和内存前，会先添加到集合pendingOffsetCommits（未完成的位移消息写入分区集合）中
     if (pendingOffsetCommits.contains(topicPartition)) {
       if (offsetWithCommitRecordMetadata.appendedBatchOffset.isEmpty)
         throw new IllegalStateException("Cannot complete offset commit write without providing the metadata of the record " +
@@ -698,7 +699,7 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
       // 将该分区对应的提交位移消息添加到offsets中
         offsets.put(topicPartition, offsetWithCommitRecordMetadata)
     }
-
+    // 新的位移消息写入内存中，相关位移分区就应该从集合pendingOffsetCommits（未完成的位移消息写入分区集合）中移除
     pendingOffsetCommits.get(topicPartition) match {
       case Some(stagedOffset) if offsetWithCommitRecordMetadata.offsetAndMetadata == stagedOffset =>
         pendingOffsetCommits.remove(topicPartition)
