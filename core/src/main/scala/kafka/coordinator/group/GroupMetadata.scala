@@ -349,7 +349,9 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   def maybeElectNewJoinedLeader(): Boolean = {
     leaderId.exists { currentLeaderId =>
       val currentLeader = get(currentLeaderId)
+      // 如果消费者组原Leader没有加入
       if (!currentLeader.isAwaitingJoin) {
+        // 找到消费者组元数据缓存中第一个已经重新加入组的成员作为Leader
         members.find(_._2.isAwaitingJoin) match {
           case Some((anyJoinedMemberId, anyJoinedMember)) =>
             leaderId = Option(anyJoinedMemberId)
@@ -588,7 +590,7 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   }
 
   /**
-   *
+   * 更新消费者组的分区分配策略支持票数，更新当前消费者组成员（member）的分区分配策略为最新（protocols），并且更新消费者成员的回调函数
    * @param member
    * @param protocols
    * @param callback
@@ -596,15 +598,22 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   def updateMember(member: MemberMetadata,
                    protocols: List[(String, Array[Byte])],
                    callback: JoinCallback): Unit = {
+    // 这里循环消费者成员（缓存中的）支持的分区分配策略，然后更新消费者组支持的分区分配策略（GroupMetadata.supportedProtocols）的支持票数，
+    // 这里是减 1，是因为缓存中的成员的策略支持票数已经是过期数据了
     member.supportedProtocols.foreach{ case (protocol, _) => supportedProtocols(protocol) -= 1 }
+    // 这里循环消费者成员目前支持的分区分配策略（入参protocols是从请求中解析出来的，是成员最新支持的策略），然后更新消费者组支持的分区分配策略的支持票数，
+    // 这里是加 1
     protocols.foreach{ case (protocol, _) => supportedProtocols(protocol) += 1 }
+    // 更新当前消费者组成员的分区分配策略
     member.supportedProtocols = protocols
-
+    // 如果成员的回调函数没有值，并且成员的MemberMetadata.awaitingJoinCallback为空，正在等待JoinGroupRequest响应的成员数量+1，TODO 这说明 调用 GroupMetadata.add 函数时，传入的回调函数为空？
     if (callback != null && !member.isAwaitingJoin) {
       numMembersAwaitingJoin += 1
     } else if (callback == null && member.isAwaitingJoin) {
+      // TODO 没看懂这里为什么减 1
       numMembersAwaitingJoin -= 1
     }
+    // 更新成员的回调函数
     member.awaitingJoinCallback = callback
   }
 
@@ -613,6 +622,7 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
     if (member.isAwaitingJoin) {
       member.awaitingJoinCallback(joinGroupResult)
       member.awaitingJoinCallback = null
+      // 发送 JoinGroupRequest 响应时，调用该函数，numMembersAwaitingJoin 减 1
       numMembersAwaitingJoin -= 1
     }
   }
@@ -623,6 +633,7 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
   def maybeInvokeSyncCallback(member: MemberMetadata,
                               syncGroupResult: SyncGroupResult): Boolean = {
     if (member.isAwaitingSync) {
+      // 调用分区分配方案发送回调，在kafka.server.KafkaApis.handleSyncGroupRequest中定义，用来发送SyncGroupRequest请求的响应
       member.awaitingSyncCallback(syncGroupResult)
       member.awaitingSyncCallback = null
       true

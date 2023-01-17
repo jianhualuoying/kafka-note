@@ -348,7 +348,8 @@ class GroupMetadataManager(brokerId: Int,
                 other
             }
           }
-
+          // 以上都是根据不同情况，生成不同类型错误，调用回调responseCallback，发送分区消费分配方案，同时更新消费者组元数据缓存（分区消费分配方案），
+          // 该回调在kafka.coordinator.group.GroupCoordinator.doSyncGroup中调用本方法时传入
           responseCallback(responseError)
         }
         // 将待写入消息插入到位移主题的目标分区下
@@ -811,10 +812,10 @@ class GroupMetadataManager(brokerId: Int,
         }
         // 处理loadedOffsets
         val (groupOffsets, emptyGroupOffsets) = loadedOffsets
-          // 按照消费者组名（kafka.coordinator.group.GroupTopicPartition.group，是string类）分类
+          // 按照消费者组名（kafka.coordinator.group.GroupTopicPartition.group，是string类）分类，分类后，key->string value->Map[GroupTopicPartition, CommitRecordMetadataAndOffset]
           .groupBy(_._1.group)
           .map { case (k, v) =>
-            // value 提取出Map <主题名，分区号>（TopicPartition） -> 提交位移值（ CommitRecordMetadataAndOffset）
+            // Map <主题名，分区号>（TopicPartition） -> 提交位移值（ CommitRecordMetadataAndOffset）作为 value
             k -> v.map { case (groupTopicPartition, offset) => (groupTopicPartition.topicPartition, offset) }
             // 按照 已经加载的消费者组 loadedGroups中是否包含消费者组名group，如果不在其中，说明没有当前提交位移消息没有组名，就放到emptyGroupOffsets中。有组名的放到groupOffsets中。
           }.partition { case (group, _) => loadedGroups.contains(group) }

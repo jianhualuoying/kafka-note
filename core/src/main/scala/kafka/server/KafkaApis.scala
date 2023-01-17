@@ -1546,9 +1546,11 @@ class KafkaApis(val requestChannel: RequestChannel,
   }
 
   def handleJoinGroupRequest(request: RequestChannel.Request): Unit = {
+    // 转换请求体为JoinGroupRequest对象
     val joinGroupRequest = request.body[JoinGroupRequest]
 
     // the callback for sending a join-group response
+    // 定义回调函数
     def sendResponseCallback(joinResult: JoinGroupResult): Unit = {
       def createResponse(requestThrottleMs: Int): AbstractResponse = {
         val protocolName = if (request.context.apiVersion() >= 7)
@@ -1580,9 +1582,11 @@ class KafkaApis(val requestChannel: RequestChannel,
       // until we are sure that all brokers support it. If static group being loaded by an older coordinator, it will discard
       // the group.instance.id field, so static members could accidentally become "dynamic", which leads to wrong states.
       sendResponseCallback(JoinGroupResult(JoinGroupRequest.UNKNOWN_MEMBER_ID, Errors.UNSUPPORTED_VERSION))
+      // 检查授权
     } else if (!authorize(request.context, READ, GROUP, joinGroupRequest.data.groupId)) {
       sendResponseCallback(JoinGroupResult(JoinGroupRequest.UNKNOWN_MEMBER_ID, Errors.GROUP_AUTHORIZATION_FAILED))
     } else {
+      // 授权检查通过
       val groupInstanceId = Option(joinGroupRequest.data.groupInstanceId)
 
       // Only return MEMBER_ID_REQUIRED error if joinGroupRequest version is >= 4
@@ -1591,28 +1595,30 @@ class KafkaApis(val requestChannel: RequestChannel,
       val requireKnownMemberId = joinGroupRequest.version >= 4 && groupInstanceId.isEmpty
 
       // let the coordinator handle join-group
+      // 构造可接受的PartitionAssignor协议集合
       val protocols = joinGroupRequest.data.protocols.valuesList.asScala.map(protocol =>
         (protocol.name, protocol.metadata)).toList
       // 通过Coordinator组件完成成员入组
       groupCoordinator.handleJoinGroup(
-        joinGroupRequest.data.groupId,
-        joinGroupRequest.data.memberId,
+        joinGroupRequest.data.groupId, // 组ID
+        joinGroupRequest.data.memberId, // Member ID
         groupInstanceId,
         requireKnownMemberId,
-        request.header.clientId,
-        request.context.clientAddress.toString,
+        request.header.clientId,       // 消费者ID
+        request.context.clientAddress.toString,  // 消费者地址
         joinGroupRequest.data.rebalanceTimeoutMs,
-        joinGroupRequest.data.sessionTimeoutMs,
+        joinGroupRequest.data.sessionTimeoutMs,  // 消费者配置的超时时间
         joinGroupRequest.data.protocolType,
-        protocols,
+        protocols,                              // 消费者可接受的PartitionAssignor协议
         sendResponseCallback)
     }
   }
 
   def handleSyncGroupRequest(request: RequestChannel.Request): Unit = {
     val syncGroupRequest = request.body[SyncGroupRequest]
-
+    // 定义处理结果发送回调，这个回调在kafka.coordinator.group.GroupCoordinator.setAndPropagateAssignment中，进行调用（实际在kafka.coordinator.group.GroupMetadata.maybeInvokeSyncCallback中调用）
     def sendResponseCallback(syncGroupResult: SyncGroupResult): Unit = {
+      // 第二个参数是回调函数，在kafka.server.KafkaApis.sendResponseMaybeThrottle中调用，用来构造要发送的响应
       sendResponseMaybeThrottle(request, requestThrottleMs =>
         new SyncGroupResponse(
           new SyncGroupResponseData()

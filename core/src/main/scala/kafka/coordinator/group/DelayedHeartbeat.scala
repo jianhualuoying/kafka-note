@@ -20,8 +20,16 @@ package kafka.coordinator.group
 import kafka.server.DelayedOperation
 
 /**
+ *
  * Delayed heartbeat operations that are added to the purgatory for session timeout checking.
  * Heartbeats are paused during rebalance.
+ * 除了正常的心跳请求外，JoinGroupRequest和SyncGroupRequest请求也被视作心跳请求处理，
+ * 当处理、响应“加入组”，“同步组”，“离开组”的请求时，协调者会触发延迟心跳的完成操作，调用 completeAndScheduleNextHeartbeatExpiration方法
+ * @param coordinator coordinator GroupCoordinator对象，DelayedHeartbeat中方法的实现方式是调用GroupCoordinator中对应的方法
+ * @param group       group 对应的GroupMetadata对象
+ * @param memberId    member 对应的MemberMetadata对象
+ * @param isPending
+ * @param timeoutMs   指定了DelayedHeartbeat的到期时长，此时间是消费者在JoinGroupRequest中设置的，且符合GroupConfig指定的合法区间
  */
 private[group] class DelayedHeartbeat(coordinator: GroupCoordinator,
                                       group: GroupMetadata,
@@ -29,9 +37,11 @@ private[group] class DelayedHeartbeat(coordinator: GroupCoordinator,
                                       isPending: Boolean,
                                       timeoutMs: Long)
   extends DelayedOperation(timeoutMs, Some(group.lock)) {
- // TODO 这里应该是心跳检查的函数，心跳检查应该由入参forceComplete完成，但是却找不到其实现 ，
- //  感觉 forceComplete 函数的实现 和 kafka.coordinator.group.GroupCoordinator.apply有关系
+ // 在添加DelayedHeartbeat任务时就会尝试一次执行，调用的是tryComplete()方法
+ // forceComplete 就是 DelayedOperation#forceComplete()方法，forceComplete方法中又调用了DelayedHeartbeat实现的 DelayedHeartbeat#onComplete()方法，以及 TimerTask.cancel 取消任务
+ // DelayedHeartbeat#onComplete最终还是调用的GroupCoordinator的onCompleteHeartbeat()，而该方法是空实现，没有任何动作。所以心跳检查最终只是取消该任务
   override def tryComplete(): Boolean = coordinator.tryCompleteHeartbeat(group, memberId, isPending, forceComplete _)
+ // 当DelayedHeartbeat到期时会调用onExpiration()方法
   override def onExpiration() = coordinator.onExpireHeartbeat(group, memberId, isPending)
   override def onComplete() = coordinator.onCompleteHeartbeat()
 }

@@ -1122,7 +1122,7 @@ public abstract class AbstractCoordinator implements Closeable {
         return client.send(coordinator, requestBuilder)
                 .compose(new HeartbeatResponseHandler(generation));
     }
-
+    // 处理消费者心跳请求响应
     private class HeartbeatResponseHandler extends CoordinatorResponseHandler<HeartbeatResponse, Void> {
         private HeartbeatResponseHandler(final Generation generation) {
             super(generation);
@@ -1145,9 +1145,12 @@ public abstract class AbstractCoordinator implements Closeable {
             } else if (error == Errors.REBALANCE_IN_PROGRESS) {
                 // since we may be sending the request during rebalance, we should check
                 // this case and ignore the REBALANCE_IN_PROGRESS error
+                // 如果协调者发送过来的响应错误码为 “正在Rebalance过程中”，则说明消费者组已经开启了rebalance流程，所以，当前消费者就要发送JoinGroupRequest请求到协调者
                 if (state == MemberState.STABLE) {
                     log.info("Attempt to heartbeat failed since group is rebalancing");
+                    // 标记rejoinNeeded为true，重新发送JoinGroupRequest请求尝试重新加入Consumer Group
                     requestRejoin();
+                    // 抛出异常
                     future.raise(error);
                 } else {
                     log.debug("Ignoring heartbeat response with error {} during {} state", error, state);

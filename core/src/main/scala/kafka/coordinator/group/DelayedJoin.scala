@@ -30,13 +30,16 @@ import scala.math.{max, min}
  * When the operation has expired, any known members that have not requested to re-join
  * the group are marked as failed, and complete this operation to proceed rebalance with
  * the rest of the group.
+ * 等待 Consumer Group 中所有的消费者发送 JoinGroupRequest 申请加入。
+ * 每当处理完新收到的 JoinGroupRequest 时，都会检测相关的DelayedJoin是否能够完成，
+ * 经过一段时间的等待，DelayedJoin也会到期执行。
  * 延迟加入组
  */
 private[group] class DelayedJoin(coordinator: GroupCoordinator,
                                  group: GroupMetadata,
                                  rebalanceTimeout: Long) extends DelayedOperation(rebalanceTimeout, Some(group.lock)) {
   /**
-   * TODO 不明白这里的forceComplete是在哪里实现的
+   * 注意这里的 forceComplete 就是 DelayedOperation#forceComplete()方法，forceComplete方法中又调用了DelayedJoin实现的 DelayedJoin#onComplete()方法
    * @return
    */
   override def tryComplete(): Boolean = coordinator.tryCompleteJoin(group, forceComplete _)
@@ -45,6 +48,7 @@ private[group] class DelayedJoin(coordinator: GroupCoordinator,
     // try to complete delayed actions introduced by coordinator.onCompleteJoin
     tryToCompleteDelayedAction()
   }
+  // 当已知Member都已申请重新加入或DelayedJoin到期时执行该方法
   override def onComplete(): Unit = coordinator.onCompleteJoin(group)
 
   // TODO: remove this ugly chain after we move the action queue to handler thread

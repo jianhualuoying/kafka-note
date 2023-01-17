@@ -96,7 +96,7 @@ private[group] class MemberMetadata(var memberId: String,
                                     var supportedProtocols: List[(String, Array[Byte])]) {
   // 保存分配给该成员的分区分配方案
   var assignment: Array[Byte] = Array.empty[Byte]
-  // 表示组成员是否正在等待加入组
+  // 表示组成员是否正在等待加入组，为空则表示成员已经加入消费者组，不为空，则表示成员还没有加入消费者组
   var awaitingJoinCallback: JoinGroupResult => Unit = null
   // 表示组成员是否正在等待 GroupCoordinator 发送分配方案
   var awaitingSyncCallback: SyncGroupResult => Unit = null
@@ -111,6 +111,7 @@ private[group] class MemberMetadata(var memberId: String,
   // this value to `false`. Upon receiving the heartbeat (or any other event
   // indicating the liveness of the client), we set it to `true` so that the
   // delayed heartbeat can be completed.
+  // 这个变量用来跟踪消费者心跳是否超时，如果心跳时间内，消费者内没有发送心跳，则设置该变量为 false，如果收到消费者发送的心跳，则设置该变量为true
   var heartbeatSatisfied: Boolean = false
 
   def isAwaitingJoin = awaitingJoinCallback != null
@@ -133,14 +134,18 @@ private[group] class MemberMetadata(var memberId: String,
   }
 
   def hasSatisfiedHeartbeat: Boolean = {
+    // isNew 用来标识消费者是否是消费者组下的新成员，heartbeatSatisfied用来标识消费者心跳是否超时
+    // 如果消费者是消费者组下的新成员，则返回消费者心跳是否超时
     if (isNew) {
       // New members can be expired while awaiting join, so we have to check this first
       heartbeatSatisfied
     } else if (isAwaitingJoin || isAwaitingSync) {
       // Members that are awaiting a rebalance automatically satisfy expected heartbeats
+      // 消费者正在等待JoinGroupResponse（awaitingJoinCallback不为空）或者正在等待SyncGroupResponse（awaitingSyncCallback不为空），则返回true
       true
     } else {
       // Otherwise we require the next heartbeat
+      // 其他情况，返回消费者心跳是否超时
       heartbeatSatisfied
     }
   }
